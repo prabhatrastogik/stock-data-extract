@@ -1,0 +1,12 @@
+dbs:
+  - path: ${SQLITE_PATH}
+    replicas:
+      - type: s3
+        bucket: ${R2_BUCKET}
+        path: ${LITESTREAM_BACKUP_PATH}
+        endpoint: https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
+        access-key-id: ${R2_ACCESS_KEY_ID}
+        secret-access-key: ${R2_SECRET_ACCESS_KEY}
+        region: auto
+        force-path-style: true
+        sync-interval: 1m

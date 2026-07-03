@@ -1,0 +1,1 @@
+ALTER TABLE instruments ADD COLUMN exchange_token INTEGER NOT NULL DEFAULT 0;

@@ -1,0 +1,19 @@
+# Environment
+.env
+
+# SQLite — main file and WAL mode journal files
+*.db
+*.db-shm
+*.db-wal
+
+# Local data directory
+data/
+
+# Built binaries
+/stock-data-extract
+
+# Go test binaries
+*.test
+
+# Claude Code session data
+.claude/

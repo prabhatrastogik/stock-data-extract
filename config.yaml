@@ -1,0 +1,42 @@
+extraction:
+  equity:
+    exchanges: ["NSE"]
+    intervals: ["day", "15min"]
+    backfill_from:
+      day: "2004-01-01"
+      15min: "2020-01-01"
+
+  futures:
+    exchanges: ["NFO"]
+    intervals: ["day"]
+    backfill_from:
+      day: "2004-01-01"
+      15min: "2020-01-01"
+
+  options:
+    exchanges: ["NFO"]
+    underlyings:
+      - NIFTY
+      - BANKNIFTY
+      - MIDCPNIFTY
+      - FINNIFTY
+      - RELIANCE
+      - TCS
+      - INFY
+      - HDFCBANK
+      - ICICIBANK
+      - WIPRO
+    intervals: ["day"]
+    backfill_from:
+      day: "2008-01-01"
+      15min: "2020-01-01"
+
+kite:
+  rate_limit_rps: 3
+  chunk_days:
+    day: 365
+    15min: 60
+
+cron:
+  schedule: "30 2 * * 2-6"         # Tue–Sat 8:00 AM IST: fetch previous trading day
+  backfill_schedule: "30 4 * * 6"  # Saturday 10:00 AM IST: catch up any missed days

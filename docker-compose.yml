@@ -1,0 +1,14 @@
+services:
+  stock-data-extract:
+    build: .
+    env_file: .env
+    volumes:
+      # Persistent SQLite + Litestream WAL files.
+      # SQLITE_PATH in .env should be /data/stock.db to match this mount.
+      - sqlite-data:/data
+      # Local litestream config — override LITESTREAM_CONFIG in .env if needed.
+      - ./litestream.yml:/app/litestream.yml:ro
+    restart: unless-stopped
+
+volumes:
+  sqlite-data:
