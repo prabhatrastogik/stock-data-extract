@@ -19,11 +19,14 @@ Data is stored as Parquet files on Cloudflare R2. SQLite (on the local filesyste
 
 | Asset class | Exchange | Intervals | History |
 |---|---|---|---|
-| Equity stocks (~2000 symbols) | NSE | daily, 15-min | Daily: 2004–present; 15-min: 2020–present |
+| Equity stocks (F&O universe, ~180 symbols) | NSE | daily, 15-min | Daily: 2004–present; 15-min: 2020–present |
+| NSE indices (NIFTY 50, NIFTY BANK, etc.) | NSE | daily, 15-min | Daily: 2004–present; 15-min: 2020–present |
 | Futures contracts (all active) | NFO | daily | Daily: 2004–present |
 | Options (index + configured stocks) | NFO | daily | Daily: 2008–present |
 
 > Add `"15min"` to `futures.intervals` / `options.intervals` in `config.yaml` to enable 15-min collection for those asset classes.
+
+> Set `fno_only: false` in the equity config to revert to all ~2000 NSE EQ symbols. Set `include_indices: false` to skip index instruments.
 
 Options are stored in a **by-underlying model**: all strikes and expiries for one underlying (e.g. NIFTY) live in a single Parquet file per year/month, rather than one file per contract.
 
@@ -94,7 +97,7 @@ Follow this sequence the very first time you set up the system:
 
 ### Prerequisites
 
-- Go 1.23+
+- Go 1.26+
 - Chrome or Chromium installed (for automated login)
 - A Zerodha Kite Connect developer account and API subscription
 - A Cloudflare R2 bucket
@@ -125,6 +128,9 @@ export R2_BUCKET=stock-data   # single source of truth — also read directly by
 # Optional
 export CONFIG_PATH=./config.yaml
 export SQLITE_PATH=./data/stock.db   # set to your persistent volume path in production (e.g. /mnt/data/stock.db)
+
+# Token refresh debug — opens a visible Chrome window instead of headless
+# export KITE_LOGIN_DEBUG=1
 ```
 
 ### Build
@@ -183,6 +189,8 @@ extraction:
     backfill_from:
       day: "2004-01-01"
       15min: "2020-01-01"
+    fno_only: true        # only extract EQ stocks with active F&O contracts (~180 symbols)
+    include_indices: true # also extract NSE index instruments (NIFTY 50, NIFTY BANK, etc.)
 
   futures:
     exchanges: ["NFO"]
@@ -220,7 +228,7 @@ cron:
 
 ### `cmd/`
 
-**`main.go`** — Binary entrypoint. Parses the subcommand (`run`, `backfill`, `token-refresh`), initialises all dependencies (config, SQLite, R2 client, Kite provider), and dispatches.
+**`main.go`** — Binary entrypoint. Parses the subcommand and dispatches. `token-refresh` is handled immediately before any initialisation (no config, SQLite, or R2 needed). All other commands load config, create the SQLite directory, open the database, and initialise R2 and the Kite provider before dispatching.
 
 - `run`: starts the cron scheduler and blocks until SIGTERM/SIGINT.
 - `backfill --type <equity|futures|options> --interval <day|15min>`: runs a full historical backfill for the given asset class and interval.
@@ -273,7 +281,7 @@ The Zerodha Kite Connect implementation of the `Provider` interface.
 4. Submit TOTP; poll the browser location until the redirect URL contains `request_token=`.
 5. Parse `request_token` from the redirect URL, call `kc.GenerateSession` to exchange it for an `access_token`.
 
-> **Note on selectors**: The CSS selectors for the Kite login form (`input[id="userid"]`, `input[id="totp"]`, etc.) target the current Kite UI. If login breaks after a Kite frontend update, inspect `https://kite.zerodha.com` in a browser and update the selectors in `login.go`.
+> **Note on selectors**: Kite's login page reuses `input[id="userid"]` across all steps. The TOTP field is identified by `input[type="number"]`. If login breaks after a Kite UI update, open DevTools on `https://kite.zerodha.com`, run `document.querySelectorAll('input').forEach(i => console.log(i.id, i.type, i.maxLength))` on each step, and update the selectors in `login.go`. Set `KITE_LOGIN_DEBUG=1` to open a visible browser window.
 
 ---
 
@@ -341,7 +349,9 @@ All dates are stored as `"YYYY-MM-DD"` strings in SQLite and converted to/from `
 
 ### `internal/extractor/`
 
-**`backfill.go`** — Full historical backfill. Entry point is `Backfiller.Run(ctx, BackfillConfig)`. Dispatches to equity, futures, or options sub-routines based on `BackfillConfig.Type`.
+**`shared.go`** — Package-level utilities shared by all three extractors: `AutoRefreshConfig`, `LastTradingDay`, `isAuthError`, `equityKey`, `futuresKey`, `candlesToRecords`, `instrumentsToParquet`. Keeping these in one place prevents divergence when the same logic is needed across backfill, incremental, and options flows.
+
+**`backfill.go`** — Full historical backfill. Entry point is `Backfiller.Run(ctx, BackfillConfig)`. Dispatches to equity, futures, or options sub-routines based on `BackfillConfig.Type`. The equity sub-routine delegates instrument selection to `equityInstrumentsFromDB` (in `shared.go`), which applies the `fno_only` and `include_indices` filters.
 
 Core logic for equity and futures:
 1. Load instruments from SQLite (fetches from Kite API and upserts if SQLite is empty).
@@ -356,6 +366,8 @@ Core logic for equity and futures:
 1. Loads all CE and PE contracts for the underlying from SQLite, filtered by `TradingSymbol` prefix (e.g., all symbols starting with `NIFTY`).
 2. For each contract × each date chunk: fetches candles and accumulates `OptionCandleRecord` rows.
 3. Groups records by their target Parquet key (by year for daily, by month for 15-min) and calls `AppendOptionCandles` once per key.
+
+**`shared.go`** also contains `equityInstrumentsFromDB`, which both backfill and incremental use to load equity instruments. When `fno_only: true`, it cross-references NSE EQ instruments against the `name` field of NFO FUT contracts in SQLite to return only the F&O universe. When `include_indices: true`, it appends NSE `INDICES` instruments. Index tradingsymbols with spaces (e.g. `"NIFTY 50"`) are normalised to hyphens (`"NIFTY-50"`) for safe use in R2 keys and SQLite checkpoints.
 
 **`incremental.go`** — Nightly incremental run. `IncrementalExtractor.Run`:
 1. Validates the access token via `GetUserProfile`. If expired and `AutoRefreshConfig` is set, calls `kite.AutoLogin` to get a fresh token.
@@ -386,13 +398,13 @@ Core logic for equity and futures:
 
 **Options backfill is limited to currently-listed contracts.** Expired contracts from before Kite's lookback window (~3–5 years for 15-min, longer for daily) cannot be retrieved. The options Parquet files will only contain data from when you started running the extractor.
 
-**Litestream for SQLite durability.** SQLite lives on a local persistent volume. Litestream streams WAL changes to R2 continuously (`sync-interval: 1m`). On a fresh deploy, `start.sh` restores the SQLite from R2 before starting the binary — so you can move between hosts without losing checkpoint state.
+**Litestream for SQLite durability.** SQLite lives on a local persistent volume. Litestream streams WAL changes to R2 continuously (`sync-interval: 1m`). On every start, `start.sh` and `run-local.sh` unconditionally restore SQLite from R2 before launching the binary — R2 is the source of truth. This means you can move between hosts without losing checkpoint state, but any local-only SQLite changes are overwritten on the next start.
 
 ---
 
 ## Token expiry
 
-Kite access tokens expire at **6:00 AM IST daily**. If the binary is running with `KITE_USER_ID` + `KITE_PASSWORD` + `KITE_TOTP_SECRET` in the environment, the incremental extractor auto-refreshes the token at startup of each run — no intervention needed.
+Kite access tokens expire at **6:00 AM IST daily**. If `KITE_USER_ID` + `KITE_PASSWORD` + `KITE_TOTP_SECRET` are set, **both** the incremental extractor and the backfill command auto-refresh the token at startup — no intervention needed.
 
 If you are **not** using auto-refresh:
 ```bash
@@ -466,6 +478,40 @@ The binary is platform-agnostic. Any Linux host (EC2, VPS, Fly.io, bare metal) w
 - A persistent disk/volume for SQLite (set `SQLITE_PATH` to a path on it)
 - Docker or a Go toolchain to build the binary
 - Chrome/Chromium installed if using automated token refresh
+
+### Local development (without Docker)
+
+`run-local.sh` is a convenience wrapper for running the binary locally. It:
+1. Loads `.env` automatically (no need to `source` manually)
+2. Rebuilds the binary before each run
+3. Restores the latest SQLite from R2 (so you start from the canonical state)
+4. Runs Litestream replication alongside the binary (SQLite changes are continuously synced to R2)
+5. Kills Litestream cleanly when the binary exits
+
+**Install Litestream** (required for R2 sync — not in Homebrew):
+```bash
+# Apple Silicon (arm64)
+curl -L https://github.com/benbjohnson/litestream/releases/download/v0.3.13/litestream-v0.3.13-darwin-arm64.zip \
+  -o /tmp/litestream.zip && unzip /tmp/litestream.zip -d /tmp/ && sudo mv /tmp/litestream /usr/local/bin/
+```
+
+**Usage:**
+```bash
+# Run the scheduler
+./run-local.sh
+
+# Run a backfill
+./run-local.sh backfill --type equity --interval day
+
+# Refresh the Kite access token (skips Litestream entirely)
+./run-local.sh token-refresh
+```
+
+If Litestream is not installed, the script falls back to running the binary directly with a warning — useful for development that doesn't need R2 durability.
+
+Set `SQLITE_PATH=./data/stock.db` in `.env` for local runs (this is the default if unset).
+
+---
 
 ### Docker Compose (recommended for local and single-host deployments)
 

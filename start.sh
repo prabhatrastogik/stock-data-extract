@@ -1,6 +1,7 @@
 #!/bin/sh
 set -e
 
+: "${SQLITE_PATH:=/data/stock.db}"
 DATA_DIR="$(dirname "$SQLITE_PATH")"
 mkdir -p "$DATA_DIR"
 
@@ -8,14 +9,11 @@ mkdir -p "$DATA_DIR"
 # Defaults to the path the Dockerfile copies it to; set to ./litestream.yml for local runs.
 LITESTREAM_CONFIG="${LITESTREAM_CONFIG:-./litestream.yml}"
 
-# Restore SQLite from replica if no local DB exists
-if [ ! -f "$SQLITE_PATH" ]; then
-    echo "Restoring SQLite from replica..."
-    litestream restore -if-replica-exists -config "$LITESTREAM_CONFIG" "$SQLITE_PATH"
-fi
+# Restore latest SQLite from R2 (source of truth) before every start
+echo "Restoring SQLite from replica..."
+litestream restore -if-replica-exists -force -config "$LITESTREAM_CONFIG" "$SQLITE_PATH"
 
-# Start Litestream replication in background
-litestream replicate -config "$LITESTREAM_CONFIG" &
-
-# Start the application
-exec /app/stock-data-extract run
+# Run litestream as PID 1 with the binary as a managed subprocess.
+# This ensures litestream receives SIGTERM from Docker and can flush WAL segments
+# to R2 before the container exits — avoiding snapshot corruption on shutdown.
+exec litestream replicate -config "$LITESTREAM_CONFIG" -exec "/app/stock-data-extract run"

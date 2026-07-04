@@ -22,9 +22,12 @@ type ExtractionConfig struct {
 }
 
 type AssetConfig struct {
-	Exchanges    []string          `yaml:"exchanges"`
-	Intervals    []string          `yaml:"intervals"`
-	BackfillFrom map[string]string `yaml:"backfill_from"`
+	Exchanges      []string          `yaml:"exchanges"`
+	Intervals      []string          `yaml:"intervals"`
+	BackfillFrom   map[string]string `yaml:"backfill_from"`
+	FnOOnly        bool              `yaml:"fno_only"`        // limit EQ to stocks with active F&O contracts
+	IncludeIndices bool              `yaml:"include_indices"` // also extract NSE index instruments
+	Indices        []string          `yaml:"indices"`         // specific indices to include (empty = all); accepts "NIFTY 50" or "NIFTY-50"
 }
 
 type OptionsConfig struct {

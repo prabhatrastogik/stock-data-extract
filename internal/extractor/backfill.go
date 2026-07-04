@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strconv"
 	"time"
 
 	"github.com/prabhatrastogik/stock-data-extract/internal/config"
 	"github.com/prabhatrastogik/stock-data-extract/internal/provider"
+	kiteprovider "github.com/prabhatrastogik/stock-data-extract/internal/provider/kite"
 	pq "github.com/prabhatrastogik/stock-data-extract/internal/storage/parquet"
 	r2client "github.com/prabhatrastogik/stock-data-extract/internal/storage/r2"
 	"github.com/prabhatrastogik/stock-data-extract/internal/storage/sqlite"
@@ -22,17 +22,39 @@ type BackfillConfig struct {
 }
 
 type Backfiller struct {
-	provider provider.Provider
-	r2       r2client.BlobStore
-	db       *sqlite.DB
-	cfg      *config.Config
+	provider       provider.RefreshableProvider
+	r2             r2client.BlobStore
+	db             *sqlite.DB
+	cfg            *config.Config
+	autoRefreshCfg *AutoRefreshConfig
 }
 
-func NewBackfiller(p provider.Provider, r2 r2client.BlobStore, db *sqlite.DB, cfg *config.Config) *Backfiller {
-	return &Backfiller{provider: p, r2: r2, db: db, cfg: cfg}
+func NewBackfiller(p provider.RefreshableProvider, r2 r2client.BlobStore, db *sqlite.DB, cfg *config.Config, autoRefreshCfg *AutoRefreshConfig) *Backfiller {
+	return &Backfiller{provider: p, r2: r2, db: db, cfg: cfg, autoRefreshCfg: autoRefreshCfg}
 }
 
 func (b *Backfiller) Run(ctx context.Context, cfg BackfillConfig) error {
+	// Validate token before starting; auto-refresh if credentials are configured.
+	if err := b.provider.ValidateToken(ctx); err != nil {
+		log.Printf("[backfill] token validation failed: %v", err)
+		if b.autoRefreshCfg == nil {
+			return fmt.Errorf("access token invalid and auto-refresh not configured — run token-refresh: %w", err)
+		}
+		log.Println("[backfill] attempting auto token refresh...")
+		newToken, refreshErr := kiteprovider.AutoLogin(
+			b.autoRefreshCfg.APIKey,
+			b.autoRefreshCfg.APISecret,
+			b.autoRefreshCfg.UserID,
+			b.autoRefreshCfg.Password,
+			b.autoRefreshCfg.TOTPSecret,
+		)
+		if refreshErr != nil {
+			return fmt.Errorf("token expired and auto-refresh failed: %w", refreshErr)
+		}
+		b.provider.SetAccessToken(newToken)
+		log.Println("[backfill] token refreshed successfully")
+	}
+
 	switch cfg.Type {
 	case "equity":
 		return b.runEquity(ctx, cfg)
@@ -52,8 +74,23 @@ func (b *Backfiller) runEquity(ctx context.Context, cfg BackfillConfig) error {
 		chunkDays = 60
 	}
 
+	// fno_only cross-references NSE EQ against NFO FUT names, so NFO instruments
+	// must be in the DB before the equity loop runs — even when only --type equity
+	// was requested and runFutures has not run.
+	if b.cfg.Extraction.Equity.FnOOnly {
+		for _, futEx := range b.cfg.Extraction.Futures.Exchanges {
+			if _, err := b.loadOrFetchInstruments(ctx, futEx, "FUT"); err != nil {
+				return err
+			}
+		}
+	}
+
 	for _, exchange := range b.cfg.Extraction.Equity.Exchanges {
-		instruments, err := b.loadOrFetchInstruments(ctx, exchange, "EQ")
+		// Ensure EQ instruments are in DB (fetches from Kite API if absent).
+		if _, err := b.loadOrFetchInstruments(ctx, exchange, "EQ"); err != nil {
+			return err
+		}
+		instruments, err := equityInstrumentsFromDB(b.db, b.cfg, exchange)
 		if err != nil {
 			return err
 		}
@@ -87,6 +124,9 @@ func (b *Backfiller) runEquity(ctx context.Context, cfg BackfillConfig) error {
 				for _, sc := range subChunks {
 					candles, err := b.provider.Historical(ctx, inst.Token, cfg.Interval, sc[0], sc[1], false, false)
 					if err != nil {
+						if isAuthError(err) {
+							return fmt.Errorf("access token invalid or expired — run token-refresh: %w", err)
+						}
 						log.Printf("[backfill] equity %s %s: %v (skipping)", inst.TradingSymbol, cfg.Interval, err)
 						allOK = false
 						continue
@@ -159,6 +199,9 @@ func (b *Backfiller) runFutures(ctx context.Context, cfg BackfillConfig) error {
 				for _, sc := range subChunks {
 					candles, err := b.provider.Historical(ctx, inst.Token, cfg.Interval, sc[0], sc[1], false, true)
 					if err != nil {
+						if isAuthError(err) {
+							return fmt.Errorf("access token invalid or expired — run token-refresh: %w", err)
+						}
 						log.Printf("[backfill] futures %s %s: %v (skipping)", inst.TradingSymbol, cfg.Interval, err)
 						allOK = false
 						continue
@@ -275,60 +318,3 @@ func splitByMonth(from, to time.Time) [][2]time.Time {
 	return out
 }
 
-func equityKey(symbol string, t time.Time, interval string) string {
-	if interval == "day" {
-		return pq.EquityDayKey(symbol, fmt.Sprintf("%d", t.Year()))
-	}
-	return pq.Equity15MinKey(symbol, t.Format("2006-01"))
-}
-
-func futuresKey(symbol string, t time.Time, interval string) string {
-	if interval == "day" {
-		return pq.FuturesDayKey(symbol, fmt.Sprintf("%d", t.Year()))
-	}
-	return pq.Futures15MinKey(symbol, t.Format("2006-01"))
-}
-
-func candlesToRecords(candles []provider.Candle) []pq.CandleRecord {
-	out := make([]pq.CandleRecord, len(candles))
-	for i, c := range candles {
-		out[i] = pq.CandleRecord{
-			Timestamp: c.Time.UnixMicro(),
-			Open:      c.Open,
-			High:      c.High,
-			Low:       c.Low,
-			Close:     c.Close,
-			Volume:    c.Volume,
-			OI:        c.OI,
-		}
-	}
-	return out
-}
-
-func instrumentsToParquet(insts []provider.Instrument) []pq.InstrumentRecord {
-	out := make([]pq.InstrumentRecord, len(insts))
-	for i, inst := range insts {
-		expiry := ""
-		if !inst.Expiry.IsZero() {
-			expiry = inst.Expiry.Format("2006-01-02")
-		}
-		token, err := strconv.ParseInt(inst.Token, 10, 64)
-		if err != nil {
-			log.Printf("[instrumentsToParquet] invalid token %q: %v", inst.Token, err)
-		}
-		out[i] = pq.InstrumentRecord{
-			Token:          token,
-			ExchangeToken:  int64(inst.ExchangeToken),
-			TradingSymbol:  inst.TradingSymbol,
-			Name:           inst.Name,
-			Exchange:       inst.Exchange,
-			InstrumentType: inst.InstrumentType,
-			Segment:        inst.Segment,
-			Expiry:         expiry,
-			Strike:         inst.Strike,
-			LotSize:        int64(inst.LotSize),
-			TickSize:       inst.TickSize,
-		}
-	}
-	return out
-}

@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	pq "github.com/prabhatrastogik/stock-data-extract/internal/storage/parquet"
@@ -64,6 +65,73 @@ func (d *DB) LatestInstruments(exchange, instrumentType string) ([]pq.Instrument
 	}
 	defer rows.Close()
 
+	return scanInstruments(rows)
+}
+
+// FnOEquityInstruments returns NSE EQ instruments whose tradingsymbol appears as
+// the name field of a futures contract in one of the futures exchanges. This
+// identifies stocks with active F&O coverage without any additional API calls.
+func (d *DB) FnOEquityInstruments(equityExchange string, futuresExchanges []string) ([]pq.InstrumentRecord, error) {
+	if len(futuresExchanges) == 0 {
+		return d.LatestInstruments(equityExchange, "EQ")
+	}
+
+	ph := make([]string, len(futuresExchanges))
+	for i := range ph {
+		ph[i] = "?"
+	}
+
+	// Kite stores NSE indices with instrument_type='EQ' and segment='INDICES'.
+	// Exclude them from the EQ/F&O result so they don't accidentally appear here
+	// even if their tradingsymbol happened to match a FUT name.
+	query := fmt.Sprintf(`
+		SELECT instrument_token, exchange_token, tradingsymbol, name, exchange,
+		       instrument_type, segment, expiry, strike, lot_size, tick_size
+		FROM instruments
+		WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM instruments)
+		  AND exchange = ?
+		  AND instrument_type = 'EQ'
+		  AND segment != 'INDICES'
+		  AND tradingsymbol IN (
+		      SELECT DISTINCT name
+		      FROM instruments
+		      WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM instruments)
+		        AND exchange IN (%s)
+		        AND instrument_type = 'FUT'
+		  )
+	`, strings.Join(ph, ","))
+
+	args := make([]interface{}, 0, 1+len(futuresExchanges))
+	args = append(args, equityExchange)
+	for _, ex := range futuresExchanges {
+		args = append(args, ex)
+	}
+
+	rows, err := d.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query F&O equity instruments: %w", err)
+	}
+	defer rows.Close()
+	return scanInstruments(rows)
+}
+
+// LatestInstrumentsBySegment returns instruments from the most recent snapshot
+// matching the given exchange and segment (e.g. "INDICES"). This is needed because
+// Kite stores NSE index instruments with instrument_type="EQ" and segment="INDICES",
+// so LatestInstruments("NSE","INDICES") would return nothing.
+func (d *DB) LatestInstrumentsBySegment(exchange, segment string) ([]pq.InstrumentRecord, error) {
+	rows, err := d.db.Query(`
+		SELECT instrument_token, exchange_token, tradingsymbol, name, exchange,
+		       instrument_type, segment, expiry, strike, lot_size, tick_size
+		FROM instruments
+		WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM instruments)
+		  AND exchange = ?
+		  AND segment = ?
+	`, exchange, segment)
+	if err != nil {
+		return nil, fmt.Errorf("query instruments by segment: %w", err)
+	}
+	defer rows.Close()
 	return scanInstruments(rows)
 }
 

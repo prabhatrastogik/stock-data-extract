@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	pq "github.com/prabhatrastogik/stock-data-extract/internal/storage/parquet"
 	_ "modernc.org/sqlite"
 )
 
@@ -85,5 +86,104 @@ func TestGetLastDateNotFound(t *testing.T) {
 	}
 	if found {
 		t.Error("expected found=false for unknown symbol")
+	}
+}
+
+func TestFnOEquityInstruments(t *testing.T) {
+	db := openTestDB(t)
+	day := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	// Seed: two NSE EQ stocks, one NSE index (Kite uses instrument_type="EQ" + segment="INDICES"),
+	// one NFO FUT (underlying = RELIANCE).
+	err := db.UpsertInstruments(day, []pq.InstrumentRecord{
+		{Token: 1, ExchangeToken: 1, TradingSymbol: "RELIANCE", Exchange: "NSE", InstrumentType: "EQ", Segment: "NSE"},
+		{Token: 2, ExchangeToken: 2, TradingSymbol: "IRFC", Exchange: "NSE", InstrumentType: "EQ", Segment: "NSE"},
+		{Token: 3, ExchangeToken: 3, TradingSymbol: "NIFTY 50", Exchange: "NSE", InstrumentType: "EQ", Segment: "INDICES"},
+		{Token: 4, ExchangeToken: 4, TradingSymbol: "RELIANCE24JULFUT", Name: "RELIANCE", Exchange: "NFO", InstrumentType: "FUT", Segment: "NFO-FUT", Expiry: "2024-07-25"},
+	})
+	if err != nil {
+		t.Fatalf("UpsertInstruments: %v", err)
+	}
+
+	recs, err := db.FnOEquityInstruments("NSE", []string{"NFO"})
+	if err != nil {
+		t.Fatalf("FnOEquityInstruments: %v", err)
+	}
+
+	if len(recs) != 1 {
+		t.Fatalf("want 1 F&O equity instrument, got %d: %v", len(recs), recs)
+	}
+	if recs[0].TradingSymbol != "RELIANCE" {
+		t.Errorf("want RELIANCE, got %s", recs[0].TradingSymbol)
+	}
+}
+
+func TestLatestInstrumentsBySegment_ReturnsIndices(t *testing.T) {
+	db := openTestDB(t)
+	day := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	// Kite stores NSE indices with instrument_type="EQ" and segment="INDICES"
+	if err := db.UpsertInstruments(day, []pq.InstrumentRecord{
+		{Token: 1, TradingSymbol: "RELIANCE", Exchange: "NSE", InstrumentType: "EQ", Segment: "NSE"},
+		{Token: 2, TradingSymbol: "NIFTY 50", Exchange: "NSE", InstrumentType: "EQ", Segment: "INDICES"},
+		{Token: 3, TradingSymbol: "NIFTY BANK", Exchange: "NSE", InstrumentType: "EQ", Segment: "INDICES"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	recs, err := db.LatestInstrumentsBySegment("NSE", "INDICES")
+	if err != nil {
+		t.Fatalf("LatestInstrumentsBySegment: %v", err)
+	}
+	if len(recs) != 2 {
+		t.Fatalf("want 2 index instruments, got %d", len(recs))
+	}
+	for _, r := range recs {
+		if r.Segment != "INDICES" {
+			t.Errorf("unexpected segment %q for %s", r.Segment, r.TradingSymbol)
+		}
+	}
+}
+
+func TestFnOEquityInstruments_ExcludesIndices(t *testing.T) {
+	db := openTestDB(t)
+	day := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	// NIFTY 50 is stored as EQ/INDICES; its FUT name is "NIFTY" which doesn't match
+	// the tradingsymbol, so it should be excluded regardless of the segment guard.
+	// RELIANCE matches because tradingsymbol == FUT name.
+	if err := db.UpsertInstruments(day, []pq.InstrumentRecord{
+		{Token: 1, TradingSymbol: "RELIANCE", Exchange: "NSE", InstrumentType: "EQ", Segment: "NSE"},
+		{Token: 2, TradingSymbol: "NIFTY 50", Exchange: "NSE", InstrumentType: "EQ", Segment: "INDICES"},
+		{Token: 3, TradingSymbol: "RELIANCE24JULFUT", Name: "RELIANCE", Exchange: "NFO", InstrumentType: "FUT", Segment: "NFO-FUT", Expiry: "2024-07-25"},
+		{Token: 4, TradingSymbol: "NIFTY24JULFUT", Name: "NIFTY", Exchange: "NFO", InstrumentType: "FUT", Segment: "NFO-FUT", Expiry: "2024-07-25"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	recs, err := db.FnOEquityInstruments("NSE", []string{"NFO"})
+	if err != nil {
+		t.Fatalf("FnOEquityInstruments: %v", err)
+	}
+	if len(recs) != 1 || recs[0].TradingSymbol != "RELIANCE" {
+		t.Errorf("want [RELIANCE], got %v", recs)
+	}
+}
+
+func TestFnOEquityInstruments_EmptyFuturesExchanges(t *testing.T) {
+	db := openTestDB(t)
+	day := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	err := db.UpsertInstruments(day, []pq.InstrumentRecord{
+		{Token: 1, TradingSymbol: "RELIANCE", Exchange: "NSE", InstrumentType: "EQ"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Empty futuresExchanges → falls back to all EQ instruments
+	recs, err := db.FnOEquityInstruments("NSE", nil)
+	if err != nil {
+		t.Fatalf("FnOEquityInstruments: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Errorf("want 1 record, got %d", len(recs))
 	}
 }

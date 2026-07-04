@@ -5,21 +5,27 @@ extraction:
     backfill_from:
       day: "2004-01-01"
       15min: "2020-01-01"
+    fno_only: true # only extract EQ stocks with active F&O contracts (~180 symbols)
+    include_indices: true # also extract NSE index instruments
+    indices: # specific indices to include (omit or leave empty for all)
+      - "NIFTY 50"
+      - "NIFTY BANK"
+      - "INDIA VIX"
 
   futures:
     exchanges: ["NFO"]
     intervals: ["day"]
     backfill_from:
-      day: "2004-01-01"
-      15min: "2020-01-01"
+      day: "2024-01-01"
+      15min: "2024-01-01"
 
   options:
     exchanges: ["NFO"]
     underlyings:
       - NIFTY
       - BANKNIFTY
-      - MIDCPNIFTY
-      - FINNIFTY
+      - ETERNAL
+      - ADANIENT
       - RELIANCE
       - TCS
       - INFY
@@ -28,8 +34,8 @@ extraction:
       - WIPRO
     intervals: ["day"]
     backfill_from:
-      day: "2008-01-01"
-      15min: "2020-01-01"
+      day: "2024-01-01"
+      15min: "2024-01-01"
 
 kite:
   rate_limit_rps: 3
@@ -38,5 +44,5 @@ kite:
     15min: 60
 
 cron:
-  schedule: "30 2 * * 2-6"         # Tue–Sat 8:00 AM IST: fetch previous trading day
-  backfill_schedule: "30 4 * * 6"  # Saturday 10:00 AM IST: catch up any missed days
+  schedule: "30 2 * * 2-6" # Tue–Sat 8:00 AM IST: fetch previous trading day
+  backfill_schedule: "30 4 * * 6" # Saturday 10:00 AM IST: catch up any missed days

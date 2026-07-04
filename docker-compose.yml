@@ -2,13 +2,19 @@ services:
   stock-data-extract:
     build: .
     env_file: .env
+    environment:
+      # Override the local-dev default (./data/stock.db) so Docker always writes
+      # to the persistent volume. Do NOT set this in .env — it would break local dev.
+      SQLITE_PATH: /data/stock.db
     volumes:
       # Persistent SQLite + Litestream WAL files.
-      # SQLITE_PATH in .env should be /data/stock.db to match this mount.
       - sqlite-data:/data
-      # Local litestream config — override LITESTREAM_CONFIG in .env if needed.
+      # Mount local litestream config so it can be updated without rebuilding.
       - ./litestream.yml:/app/litestream.yml:ro
     restart: unless-stopped
+    # Allow enough time for a running incremental job (~180 symbols × 2 intervals
+    # at 3 RPS ≈ 2 min) to finish and for litestream to flush WAL segments to R2.
+    stop_grace_period: 5m
 
 volumes:
   sqlite-data:

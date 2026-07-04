@@ -109,6 +109,9 @@ func (o *OptionsExtractor) extractUnderlying(ctx context.Context, underlying, in
 				token := fmt.Sprintf("%d", contract.Token)
 				candles, err := o.provider.Historical(ctx, token, interval, sc[0], sc[1], false, true)
 				if err != nil {
+					if isAuthError(err) {
+						return fmt.Errorf("access token invalid or expired — run token-refresh: %w", err)
+					}
 					log.Printf("[options] %s %s token %s: %v (skipping)", underlying, interval, token, err)
 					allOK = false
 					continue

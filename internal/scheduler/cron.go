@@ -64,22 +64,10 @@ func (s *Scheduler) runIncremental(ctx context.Context) {
 	}
 }
 
-// lastTradingDay returns the most recent weekday before today (skips Sat/Sun).
-func lastTradingDay(today time.Time) time.Time {
-	yesterday := today.AddDate(0, 0, -1)
-	switch yesterday.Weekday() {
-	case time.Saturday:
-		return yesterday.AddDate(0, 0, -1)
-	case time.Sunday:
-		return yesterday.AddDate(0, 0, -2)
-	}
-	return yesterday
-}
-
 func (s *Scheduler) runWeeklyBackfill(ctx context.Context) {
 	log.Println("[scheduler] starting weekly catch-up backfill")
 	today := time.Now().UTC().Truncate(24 * time.Hour)
-	end := lastTradingDay(today)
+	end := extractor.LastTradingDay(today)
 
 	cfg := s.cfg.Extraction
 	type job struct {

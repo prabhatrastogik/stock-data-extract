@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -25,9 +26,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	// token-refresh needs no config, SQLite, or R2 — dispatch before any initialisation
+	if os.Args[1] == "token-refresh" {
+		runTokenRefresh()
+		return
+	}
+
 	cfg, err := config.Load(envOrDefault("CONFIG_PATH", "config.yaml"))
 	if err != nil {
 		log.Fatalf("config: %v", err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(cfg.SQLitePath), 0o755); err != nil {
+		log.Fatalf("sqlite dir: %v", err)
 	}
 
 	db, err := sqlite.Open(cfg.SQLitePath)
@@ -56,10 +67,7 @@ func main() {
 		runScheduler(cfg, kiteProvider, r2, db, autoRefreshCfg)
 
 	case "backfill":
-		runBackfill(cfg, kiteProvider, r2, db, os.Args[2:])
-
-	case "token-refresh":
-		runTokenRefresh()
+		runBackfill(cfg, kiteProvider, r2, db, autoRefreshCfg, os.Args[2:])
 
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
@@ -79,7 +87,7 @@ func runScheduler(
 	}
 
 	inc := extractor.NewIncrementalExtractor(kiteProvider, r2, db, cfg, autoRefreshCfg)
-	bf := extractor.NewBackfiller(kiteProvider, r2, db, cfg)
+	bf := extractor.NewBackfiller(kiteProvider, r2, db, cfg, autoRefreshCfg)
 	sched := scheduler.New(inc, bf, cfg)
 
 	if err := sched.Start(); err != nil {
@@ -101,6 +109,7 @@ func runBackfill(
 	kiteProvider *kiteprovider.KiteProvider,
 	r2 *r2client.Client,
 	db *sqlite.DB,
+	autoRefreshCfg *extractor.AutoRefreshConfig,
 	args []string,
 ) {
 	fs := flag.NewFlagSet("backfill", flag.ExitOnError)
@@ -130,12 +139,12 @@ func runBackfill(
 	}
 
 	today := time.Now().UTC().Truncate(24 * time.Hour)
-	bf := extractor.NewBackfiller(kiteProvider, r2, db, cfg)
+	bf := extractor.NewBackfiller(kiteProvider, r2, db, cfg, autoRefreshCfg)
 	bcfg := extractor.BackfillConfig{
 		Type:      *assetType,
 		Interval:  *interval,
 		StartDate: startDate,
-		EndDate:   lastTradingDay(today),
+		EndDate:   extractor.LastTradingDay(today),
 	}
 
 	log.Printf("Starting backfill: type=%s interval=%s from=%s", *assetType, *interval, startDate.Format("2006-01-02"))
@@ -186,17 +195,6 @@ func buildAutoRefreshConfig() *extractor.AutoRefreshConfig {
 		Password:   password,
 		TOTPSecret: totpSecret,
 	}
-}
-
-func lastTradingDay(today time.Time) time.Time {
-	yesterday := today.AddDate(0, 0, -1)
-	switch yesterday.Weekday() {
-	case time.Saturday:
-		return yesterday.AddDate(0, 0, -1)
-	case time.Sunday:
-		return yesterday.AddDate(0, 0, -2)
-	}
-	return yesterday
 }
 
 func mustEnv(key string) string {

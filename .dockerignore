@@ -1,0 +1,18 @@
+# Secrets — never bake into image layers
+.env
+
+# Local data — large and irrelevant to the build
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Built output
+stock-data-extract
+
+# Go test artifacts
+*.test
+*.out
+
+# Dev tooling
+.claude/

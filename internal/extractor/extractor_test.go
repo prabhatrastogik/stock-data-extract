@@ -232,7 +232,7 @@ func TestSplitByMonth_CrossesMonthBoundary(t *testing.T) {
 
 func TestLastTradingDay_Tuesday(t *testing.T) {
 	tue := time.Date(2024, 1, 9, 0, 0, 0, 0, time.UTC)
-	got := lastTradingDay(tue)
+	got := LastTradingDay(tue)
 	want := time.Date(2024, 1, 8, 0, 0, 0, 0, time.UTC) // Monday
 	if !got.Equal(want) {
 		t.Errorf("Tuesday: want Monday %v, got %v", want, got)
@@ -242,7 +242,7 @@ func TestLastTradingDay_Tuesday(t *testing.T) {
 func TestLastTradingDay_Monday(t *testing.T) {
 	// Monday → yesterday is Sunday → skip back 2 → Friday
 	mon := time.Date(2024, 1, 8, 0, 0, 0, 0, time.UTC)
-	got := lastTradingDay(mon)
+	got := LastTradingDay(mon)
 	want := time.Date(2024, 1, 5, 0, 0, 0, 0, time.UTC) // Friday
 	if !got.Equal(want) {
 		t.Errorf("Monday: want Friday %v, got %v", want, got)
@@ -252,7 +252,7 @@ func TestLastTradingDay_Monday(t *testing.T) {
 func TestLastTradingDay_Sunday(t *testing.T) {
 	// Sunday → yesterday is Saturday → skip back 1 → Friday
 	sun := time.Date(2024, 1, 7, 0, 0, 0, 0, time.UTC)
-	got := lastTradingDay(sun)
+	got := LastTradingDay(sun)
 	want := time.Date(2024, 1, 5, 0, 0, 0, 0, time.UTC) // Friday
 	if !got.Equal(want) {
 		t.Errorf("Sunday: want Friday %v, got %v", want, got)
@@ -262,7 +262,7 @@ func TestLastTradingDay_Sunday(t *testing.T) {
 func TestLastTradingDay_Saturday(t *testing.T) {
 	// Saturday → yesterday is Friday → return Friday
 	sat := time.Date(2024, 1, 6, 0, 0, 0, 0, time.UTC)
-	got := lastTradingDay(sat)
+	got := LastTradingDay(sat)
 	want := time.Date(2024, 1, 5, 0, 0, 0, 0, time.UTC) // Friday
 	if !got.Equal(want) {
 		t.Errorf("Saturday: want Friday %v, got %v", want, got)
@@ -360,10 +360,69 @@ func TestInstrumentsToParquet_InvalidToken(t *testing.T) {
 	}
 }
 
+func TestSanitizeSymbol(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"RELIANCE", "RELIANCE"},
+		{"NIFTY 50", "NIFTY-50"},
+		{"NIFTY BANK", "NIFTY-BANK"},
+		{"INDIA VIX", "INDIA-VIX"},
+	}
+	for _, c := range cases {
+		got := sanitizeSymbol(c.in)
+		if got != c.want {
+			t.Errorf("sanitizeSymbol(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestEquityInstrumentsFromDB_FnOFilter(t *testing.T) {
+	db := openTestDB(t)
+	day := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := db.UpsertInstruments(day, []pq.InstrumentRecord{
+		{Token: 1, TradingSymbol: "RELIANCE", Exchange: "NSE", InstrumentType: "EQ"},
+		{Token: 2, TradingSymbol: "IRFC", Exchange: "NSE", InstrumentType: "EQ"},
+		{Token: 3, TradingSymbol: "NIFTY 50", Exchange: "NSE", InstrumentType: "EQ", Segment: "INDICES"},
+		{Token: 4, TradingSymbol: "RELIANCE24JULFUT", Name: "RELIANCE", Exchange: "NFO", InstrumentType: "FUT", Expiry: "2024-07-25"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := testCfg()
+	cfg.Extraction.Equity.FnOOnly = true
+	cfg.Extraction.Equity.IncludeIndices = true
+
+	instruments, err := equityInstrumentsFromDB(db, cfg, "NSE")
+	if err != nil {
+		t.Fatalf("equityInstrumentsFromDB: %v", err)
+	}
+
+	// Expect RELIANCE (F&O EQ) + NIFTY-50 (index, sanitized)
+	if len(instruments) != 2 {
+		t.Fatalf("want 2 instruments, got %d: %v", len(instruments), instruments)
+	}
+
+	bySymbol := make(map[string]string)
+	for _, inst := range instruments {
+		bySymbol[inst.TradingSymbol] = inst.Token
+	}
+	if _, ok := bySymbol["RELIANCE"]; !ok {
+		t.Error("RELIANCE should be included as F&O stock")
+	}
+	if _, ok := bySymbol["NIFTY-50"]; !ok {
+		t.Error("NIFTY-50 (sanitized from NIFTY 50) should be included as an index")
+	}
+	if _, ok := bySymbol["IRFC"]; ok {
+		t.Error("IRFC should be excluded (no F&O)")
+	}
+	if _, ok := bySymbol["NIFTY 50"]; ok {
+		t.Error("unsanitized 'NIFTY 50' should not appear — spaces must be replaced")
+	}
+}
+
 // ---- integration tests ----
 
 func TestBackfiller_UnknownType(t *testing.T) {
-	b := NewBackfiller(&fakeProvider{}, newFakeBlob(), openTestDB(t), testCfg())
+	b := NewBackfiller(&fakeProvider{}, newFakeBlob(), openTestDB(t), testCfg(), nil)
 	err := b.Run(context.Background(), BackfillConfig{Type: "bogus"})
 	if err == nil {
 		t.Fatal("want error for unknown type")
@@ -385,7 +444,7 @@ func TestBackfiller_Equity_StoresCandles(t *testing.T) {
 	start := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2024, 1, 5, 0, 0, 0, 0, time.UTC)
 
-	b := NewBackfiller(fp, blob, db, testCfg())
+	b := NewBackfiller(fp, blob, db, testCfg(), nil)
 	if err := b.Run(context.Background(), BackfillConfig{
 		Type: "equity", Interval: "day", StartDate: start, EndDate: end,
 	}); err != nil {
@@ -420,7 +479,7 @@ func TestBackfiller_Equity_CheckpointNotAdvancedOnProviderError(t *testing.T) {
 	start := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2024, 1, 5, 0, 0, 0, 0, time.UTC)
 
-	b := NewBackfiller(fp, newFakeBlob(), db, testCfg())
+	b := NewBackfiller(fp, newFakeBlob(), db, testCfg(), nil)
 	// Error from provider is logged and skipped — Run itself succeeds
 	_ = b.Run(context.Background(), BackfillConfig{
 		Type: "equity", Interval: "day", StartDate: start, EndDate: end,
@@ -453,7 +512,7 @@ func TestBackfiller_Equity_ResumesFromCheckpoint(t *testing.T) {
 	start := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2024, 1, 5, 0, 0, 0, 0, time.UTC)
 
-	b := NewBackfiller(fp, newFakeBlob(), db, testCfg())
+	b := NewBackfiller(fp, newFakeBlob(), db, testCfg(), nil)
 	if err := b.Run(context.Background(), BackfillConfig{
 		Type: "equity", Interval: "day", StartDate: start, EndDate: end,
 	}); err != nil {
@@ -480,7 +539,7 @@ func TestBackfiller_Equity_SkipsWhenAlreadyComplete(t *testing.T) {
 	}
 
 	fp := &fakeProvider{}
-	b := NewBackfiller(fp, newFakeBlob(), db, testCfg())
+	b := NewBackfiller(fp, newFakeBlob(), db, testCfg(), nil)
 	if err := b.Run(context.Background(), BackfillConfig{
 		Type: "equity", Interval: "day",
 		StartDate: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -512,7 +571,7 @@ func TestBackfiller_Equity_FetchesInstrumentsFromProviderWhenDBEmpty(t *testing.
 	start := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2024, 1, 5, 0, 0, 0, 0, time.UTC)
 
-	b := NewBackfiller(fp, newFakeBlob(), db, testCfg())
+	b := NewBackfiller(fp, newFakeBlob(), db, testCfg(), nil)
 	if err := b.Run(context.Background(), BackfillConfig{
 		Type: "equity", Interval: "day", StartDate: start, EndDate: end,
 	}); err != nil {

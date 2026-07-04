@@ -32,9 +32,19 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("open sqlite %s: %w", path, err)
 	}
 
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("enable WAL: %w", err)
+	// wal_autocheckpoint=0: disable SQLite's built-in auto-checkpoint so Litestream
+	// can manage checkpointing itself. Without this, SQLite can move WAL frames to
+	// the main DB mid-snapshot, producing non-sequential page numbers in the R2 backup.
+	// busy_timeout: prevents lock errors when Litestream holds a read lock during snapshot.
+	for _, pragma := range []string{
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA wal_autocheckpoint=0",
+		"PRAGMA busy_timeout=5000",
+	} {
+		if _, err := db.Exec(pragma); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("%s: %w", pragma, err)
+		}
 	}
 
 	store := &DB{db: db}

@@ -14,15 +14,6 @@ import (
 	"github.com/prabhatrastogik/stock-data-extract/internal/storage/sqlite"
 )
 
-// AutoRefreshConfig holds credentials needed for automated token refresh.
-type AutoRefreshConfig struct {
-	APIKey     string
-	APISecret  string
-	UserID     string
-	Password   string
-	TOTPSecret string
-}
-
 type IncrementalExtractor struct {
 	provider         provider.RefreshableProvider
 	r2               r2client.BlobStore
@@ -57,7 +48,7 @@ func (e *IncrementalExtractor) Run(ctx context.Context) error {
 	if err := e.provider.ValidateToken(ctx); err != nil {
 		log.Printf("[incremental] token validation failed: %v", err)
 		if e.autoRefreshCfg == nil {
-			return fmt.Errorf("access token invalid and auto-refresh not configured: %w", err)
+			return fmt.Errorf("access token invalid and auto-refresh not configured — run token-refresh: %w", err)
 		}
 		log.Println("[incremental] attempting auto token refresh...")
 		newToken, refreshErr := kiteprovider.AutoLogin(
@@ -75,7 +66,7 @@ func (e *IncrementalExtractor) Run(ctx context.Context) error {
 	}
 
 	today := time.Now().UTC().Truncate(24 * time.Hour)
-	yesterday := lastTradingDay(today)
+	yesterday := LastTradingDay(today)
 
 	// Step 1: Fetch and store instruments snapshot
 	if err := e.fetchAndStoreInstruments(ctx, today); err != nil {
@@ -108,10 +99,11 @@ func (e *IncrementalExtractor) fetchAndStoreInstruments(ctx context.Context, tod
 
 	var allInsts []pq.InstrumentRecord
 
-	// Collect the unique set of exchanges across equity and futures config.
+	// Collect the unique set of exchanges across equity, futures, and options config.
 	seen := make(map[string]bool)
 	var exchanges []string
-	for _, ex := range append(e.cfg.Extraction.Equity.Exchanges, e.cfg.Extraction.Futures.Exchanges...) {
+	all := append(append(e.cfg.Extraction.Equity.Exchanges, e.cfg.Extraction.Futures.Exchanges...), e.cfg.Extraction.Options.Exchanges...)
+	for _, ex := range all {
 		if !seen[ex] {
 			seen[ex] = true
 			exchanges = append(exchanges, ex)
@@ -141,7 +133,8 @@ func (e *IncrementalExtractor) fetchAndStoreInstruments(ctx context.Context, tod
 
 func (e *IncrementalExtractor) runEquityIncremental(ctx context.Context, day time.Time) error {
 	for _, exchange := range e.cfg.Extraction.Equity.Exchanges {
-		instruments, err := e.db.LatestInstruments(exchange, "EQ")
+		// Instruments are already in DB (fetchAndStoreInstruments ran first).
+		instruments, err := equityInstrumentsFromDB(e.db, e.cfg, exchange)
 		if err != nil {
 			return err
 		}
@@ -153,10 +146,12 @@ func (e *IncrementalExtractor) runEquityIncremental(ctx context.Context, day tim
 				return err
 			}
 
-			token := fmt.Sprintf("%d", inst.Token)
 			for _, interval := range e.cfg.Extraction.Equity.Intervals {
-				candles, err := e.provider.Historical(ctx, token, interval, day, day, false, false)
+				candles, err := e.provider.Historical(ctx, inst.Token, interval, day, day, false, false)
 				if err != nil {
+					if isAuthError(err) {
+						return fmt.Errorf("access token invalid or expired — run token-refresh: %w", err)
+					}
 					log.Printf("[incremental] equity %s %s: %v (skipping)", inst.TradingSymbol, interval, err)
 					continue
 				}
@@ -197,6 +192,9 @@ func (e *IncrementalExtractor) runFuturesIncremental(ctx context.Context, day ti
 			for _, interval := range e.cfg.Extraction.Futures.Intervals {
 				candles, err := e.provider.Historical(ctx, token, interval, day, day, false, true)
 				if err != nil {
+					if isAuthError(err) {
+						return fmt.Errorf("access token invalid or expired — run token-refresh: %w", err)
+					}
 					log.Printf("[incremental] futures %s %s: %v (skipping)", inst.TradingSymbol, interval, err)
 					continue
 				}
@@ -219,14 +217,3 @@ func (e *IncrementalExtractor) runFuturesIncremental(ctx context.Context, day ti
 	return nil
 }
 
-// lastTradingDay returns yesterday, skipping weekends (Saturday→Friday, Sunday→Friday).
-func lastTradingDay(today time.Time) time.Time {
-	yesterday := today.AddDate(0, 0, -1)
-	switch yesterday.Weekday() {
-	case time.Saturday:
-		return yesterday.AddDate(0, 0, -1)
-	case time.Sunday:
-		return yesterday.AddDate(0, 0, -2)
-	}
-	return yesterday
-}

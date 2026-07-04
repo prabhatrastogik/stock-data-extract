@@ -10,3 +10,5 @@ dbs:
         region: auto
         force-path-style: true
         sync-interval: 1m
+        retention: 24h          # keep only 24h of WAL segments; older ones are pruned
+        retention-check-interval: 1h
