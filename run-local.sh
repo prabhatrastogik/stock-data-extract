@@ -35,9 +35,11 @@ if ! command -v litestream &>/dev/null; then
   exec ./stock-data-extract "$@"
 fi
 
-# Restore latest DB from R2 (source of truth) before every run
+# Restore latest DB from R2 (source of truth) before every run.
+# Delete local file first so litestream restore doesn't refuse to overwrite it.
 echo "[litestream] restoring from R2 (if backup exists)..."
-litestream restore -if-replica-exists -force -config litestream.yml "$SQLITE_PATH"
+rm -f "$SQLITE_PATH" "${SQLITE_PATH}-shm" "${SQLITE_PATH}-wal"
+litestream restore -if-replica-exists -config litestream.yml "$SQLITE_PATH"
 
 # Start litestream replication in background
 echo "[litestream] starting continuous replication to R2..."

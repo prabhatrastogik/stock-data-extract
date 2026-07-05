@@ -9,9 +9,11 @@ mkdir -p "$DATA_DIR"
 # Defaults to the path the Dockerfile copies it to; set to ./litestream.yml for local runs.
 LITESTREAM_CONFIG="${LITESTREAM_CONFIG:-./litestream.yml}"
 
-# Restore latest SQLite from R2 (source of truth) before every start
+# Restore latest SQLite from R2 (source of truth) before every start.
+# Delete local file first so litestream restore doesn't refuse to overwrite it.
 echo "Restoring SQLite from replica..."
-litestream restore -if-replica-exists -force -config "$LITESTREAM_CONFIG" "$SQLITE_PATH"
+rm -f "$SQLITE_PATH" "${SQLITE_PATH}-shm" "${SQLITE_PATH}-wal"
+litestream restore -if-replica-exists -config "$LITESTREAM_CONFIG" "$SQLITE_PATH"
 
 # Run litestream as PID 1 with the binary as a managed subprocess.
 # This ensures litestream receives SIGTERM from Docker and can flush WAL segments
