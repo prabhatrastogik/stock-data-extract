@@ -22,6 +22,7 @@ type ExtractionConfig struct {
 }
 
 type AssetConfig struct {
+	Disabled       bool              `yaml:"disabled"`        // skip this asset type in incremental runs and scheduled backfill
 	Exchanges      []string          `yaml:"exchanges"`
 	Intervals      []string          `yaml:"intervals"`
 	BackfillFrom   map[string]string `yaml:"backfill_from"`
@@ -31,6 +32,7 @@ type AssetConfig struct {
 }
 
 type OptionsConfig struct {
+	Disabled     bool              `yaml:"disabled"`        // skip options in incremental runs and scheduled backfill
 	Exchanges    []string          `yaml:"exchanges"`
 	Underlyings  []string          `yaml:"underlyings"`
 	Intervals    []string          `yaml:"intervals"`

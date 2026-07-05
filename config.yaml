@@ -13,11 +13,12 @@ extraction:
       - "INDIA VIX"
 
   futures:
+    disabled: false
     exchanges: ["NFO"]
     intervals: ["day"]
     backfill_from:
-      day: "2024-01-01"
-      15min: "2024-01-01"
+      day: "2026-01-01"
+      15min: "2026-01-01"
 
   options:
     exchanges: ["NFO"]
@@ -31,11 +32,10 @@ extraction:
       - INFY
       - HDFCBANK
       - ICICIBANK
-      - WIPRO
     intervals: ["day"]
     backfill_from:
-      day: "2024-01-01"
-      15min: "2024-01-01"
+      day: "2026-01-01"
+      15min: "2026-01-01"
 
 kite:
   rate_limit_rps: 3

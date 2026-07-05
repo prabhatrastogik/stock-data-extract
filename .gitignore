@@ -1,3 +1,8 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
 # Environment
 .env
 
@@ -8,12 +13,20 @@
 
 # Local data directory
 data/
+build/
 
 # Built binaries
 /stock-data-extract
 
 # Go test binaries
 *.test
+*.out
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
 
 # Claude Code session data
 .claude/

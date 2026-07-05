@@ -74,20 +74,32 @@ func (e *IncrementalExtractor) Run(ctx context.Context) error {
 	}
 
 	// Step 2: Equity
-	if err := e.runEquityIncremental(ctx, yesterday); err != nil {
-		log.Printf("[incremental] equity error: %v", err)
+	if !e.cfg.Extraction.Equity.Disabled {
+		if err := e.runEquityIncremental(ctx, yesterday); err != nil {
+			log.Printf("[incremental] equity error: %v", err)
+		}
+	} else {
+		log.Println("[incremental] equity disabled — skipping")
 	}
 
 	// Step 3: Futures
-	if err := e.runFuturesIncremental(ctx, yesterday); err != nil {
-		log.Printf("[incremental] futures error: %v", err)
+	if !e.cfg.Extraction.Futures.Disabled {
+		if err := e.runFuturesIncremental(ctx, yesterday); err != nil {
+			log.Printf("[incremental] futures error: %v", err)
+		}
+	} else {
+		log.Println("[incremental] futures disabled — skipping")
 	}
 
 	// Step 4: Options
-	for _, interval := range e.cfg.Extraction.Options.Intervals {
-		if err := e.optionsExtractor.RunIncremental(ctx, interval, yesterday); err != nil {
-			log.Printf("[incremental] options %s error: %v", interval, err)
+	if !e.cfg.Extraction.Options.Disabled {
+		for _, interval := range e.cfg.Extraction.Options.Intervals {
+			if err := e.optionsExtractor.RunIncremental(ctx, interval, yesterday); err != nil {
+				log.Printf("[incremental] options %s error: %v", interval, err)
+			}
 		}
+	} else {
+		log.Println("[incremental] options disabled — skipping")
 	}
 
 	log.Println("[incremental] run complete")

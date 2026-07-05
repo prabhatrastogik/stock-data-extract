@@ -87,9 +87,11 @@ Runs a one-off historical backfill for a given asset type and interval. Exits wh
 
 | Value | Description |
 |---|---|
-| `equity` | All NSE equity stocks (~2000 symbols) |
+| `equity` | NSE equity stocks — F&O universe + configured indices (~213 symbols with default config) |
 | `futures` | All active NFO futures contracts |
 | `options` | Index and stock options for configured underlyings |
+
+> The `disabled` flag in `config.yaml` has **no effect** on manual `backfill` commands. It only controls the scheduled incremental run and the Saturday catch-up backfill.
 
 **`--interval`** (optional, default: `day`)
 
@@ -100,12 +102,14 @@ Runs a one-off historical backfill for a given asset type and interval. Exits wh
 
 Start dates are read from `config.yaml` under `extraction.<type>.backfill_from.<interval>`.
 
-**Equity symbol filter** — controlled by two fields in `config.yaml` under `extraction.equity`:
+**Equity symbol filter** — controlled by fields in `config.yaml` under `extraction.equity`:
 
 | Field | Default | Effect |
 |---|---|---|
-| `fno_only: true` | `false` | Restrict extraction to NSE stocks with active F&O contracts (~180 symbols instead of ~2000). Cross-references NSE EQ instruments against NFO FUT contracts using the stored instruments snapshot. |
-| `include_indices: true` | `false` | Also extract NSE index instruments: NIFTY 50, NIFTY BANK, INDIA VIX, etc. Their tradingsymbols are normalised (spaces → hyphens) in R2 keys and SQLite checkpoints. |
+| `fno_only: true` | `false` | Restrict extraction to NSE stocks with active F&O contracts (~211 symbols instead of ~2000). Cross-references NSE EQ `tradingsymbol` against NFO FUT `name` field using the stored instruments snapshot. |
+| `include_indices: true` | `false` | Also extract NSE index instruments. Kite stores these with `instrument_type="EQ"` and `segment="INDICES"` — not `instrument_type="INDICES"`. |
+| `indices: ["NIFTY 50", "NIFTY BANK"]` | `[]` (all) | When `include_indices: true`, restrict to this specific list of indices. Accepts both `"NIFTY 50"` and `"NIFTY-50"` forms. Leave empty or omit to fetch all index instruments. |
+| `disabled: true` | `false` | Skip this asset type in the scheduled incremental run and Saturday catch-up backfill. Manual `backfill` commands are unaffected. |
 
 **Examples:**
 
@@ -168,6 +172,8 @@ All variables are loaded from `.env` in the current directory. The table below c
 ### Kite auto-refresh (recommended)
 
 If all three are set, the binary automatically refreshes the access token at startup of each incremental run **and** each backfill. `KITE_ACCESS_TOKEN` becomes optional.
+
+> **Do not run multiple `./run-local.sh backfill` terminals in parallel.** Each invocation starts its own Litestream replication process writing to the same R2 path — multiple concurrent writers corrupt the backup. Run equity, futures, and options backfills sequentially.
 
 | Variable | Example | Description |
 |---|---|---|

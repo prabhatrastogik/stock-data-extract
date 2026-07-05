@@ -75,10 +75,15 @@ func (s *Scheduler) runWeeklyBackfill(ctx context.Context) {
 		intervals []string
 		startDates map[string]string
 	}
-	jobs := []job{
-		{"equity", cfg.Equity.Intervals, cfg.Equity.BackfillFrom},
-		{"futures", cfg.Futures.Intervals, cfg.Futures.BackfillFrom},
-		{"options", cfg.Options.Intervals, cfg.Options.BackfillFrom},
+	jobs := []job{}
+	if !cfg.Equity.Disabled {
+		jobs = append(jobs, job{"equity", cfg.Equity.Intervals, cfg.Equity.BackfillFrom})
+	}
+	if !cfg.Futures.Disabled {
+		jobs = append(jobs, job{"futures", cfg.Futures.Intervals, cfg.Futures.BackfillFrom})
+	}
+	if !cfg.Options.Disabled {
+		jobs = append(jobs, job{"options", cfg.Options.Intervals, cfg.Options.BackfillFrom})
 	}
 
 	for _, j := range jobs {
