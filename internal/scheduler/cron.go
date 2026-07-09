@@ -71,8 +71,8 @@ func (s *Scheduler) runWeeklyBackfill(ctx context.Context) {
 
 	cfg := s.cfg.Extraction
 	type job struct {
-		assetType string
-		intervals []string
+		assetType  string
+		intervals  []string
 		startDates map[string]string
 	}
 	jobs := []job{}

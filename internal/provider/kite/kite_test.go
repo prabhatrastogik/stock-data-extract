@@ -44,7 +44,7 @@ func TestValidateToken_Success(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, successEnvelope(`{"user_id":"U1","user_name":"Test","email":"t@t.com","broker":"ZERODHA","products":[],"order_types":[],"exchanges":[]}`))
+		_, _ = fmt.Fprint(w, successEnvelope(`{"user_id":"U1","user_name":"Test","email":"t@t.com","broker":"ZERODHA","products":[],"order_types":[],"exchanges":[]}`))
 	}))
 
 	if err := p.ValidateToken(context.Background()); err != nil {
@@ -56,7 +56,7 @@ func TestValidateToken_TokenError(t *testing.T) {
 	p := newTestProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
-		fmt.Fprint(w, errorEnvelope("TokenException", "Invalid token"))
+		_, _ = fmt.Fprint(w, errorEnvelope("TokenException", "Invalid token"))
 	}))
 
 	err := p.ValidateToken(context.Background())
@@ -97,7 +97,7 @@ func TestInstruments_Success(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/csv")
-		fmt.Fprint(w, instrumentsCSV)
+		_, _ = fmt.Fprint(w, instrumentsCSV)
 	}))
 
 	insts, err := p.Instruments(context.Background(), "NSE")
@@ -132,7 +132,7 @@ func TestInstruments_DerivativeExpiry(t *testing.T) {
 
 	p := newTestProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/csv")
-		fmt.Fprint(w, csv)
+		_, _ = fmt.Fprint(w, csv)
 	}))
 
 	insts, err := p.Instruments(context.Background(), "NFO")
@@ -159,7 +159,7 @@ func TestInstruments_EmptyExchange(t *testing.T) {
 
 	p := newTestProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/csv")
-		fmt.Fprint(w, csv)
+		_, _ = fmt.Fprint(w, csv)
 	}))
 
 	insts, err := p.Instruments(context.Background(), "NSE")
@@ -176,7 +176,7 @@ func TestInstruments_RequestURL(t *testing.T) {
 	p := newTestProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		w.Header().Set("Content-Type", "text/csv")
-		fmt.Fprint(w, `instrument_token,exchange_token,tradingsymbol,name,last_price,expiry,strike,tick_size,lot_size,instrument_type,segment,exchange`)
+		_, _ = fmt.Fprint(w, `instrument_token,exchange_token,tradingsymbol,name,last_price,expiry,strike,tick_size,lot_size,instrument_type,segment,exchange`)
 	}))
 
 	_, _ = p.Instruments(context.Background(), "NFO")
@@ -200,7 +200,7 @@ func TestHistorical_Success(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, singleCandleBody)
+		_, _ = fmt.Fprint(w, singleCandleBody)
 	}))
 
 	from := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
@@ -237,7 +237,7 @@ func TestHistorical_IntervalMappedTo15Minute(t *testing.T) {
 	p := newTestProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"status":"success","data":{"candles":[]}}`)
+		_, _ = fmt.Fprint(w, `{"status":"success","data":{"candles":[]}}`)
 	}))
 
 	from := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
@@ -255,7 +255,7 @@ func TestHistorical_OIAndContinuousParams(t *testing.T) {
 	p := newTestProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.RawQuery
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"status":"success","data":{"candles":[]}}`)
+		_, _ = fmt.Fprint(w, `{"status":"success","data":{"candles":[]}}`)
 	}))
 
 	from := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
@@ -293,10 +293,10 @@ func TestHistorical_RateLimitRetries(t *testing.T) {
 		if n < 3 {
 			// First two attempts hit rate limit.
 			w.WriteHeader(http.StatusTooManyRequests)
-			fmt.Fprint(w, errorEnvelope("GeneralException", "Too Many Requests"))
+			_, _ = fmt.Fprint(w, errorEnvelope("GeneralException", "Too Many Requests"))
 			return
 		}
-		fmt.Fprint(w, singleCandleBody)
+		_, _ = fmt.Fprint(w, singleCandleBody)
 	}))
 
 	from := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
@@ -318,7 +318,7 @@ func TestHistorical_RateLimitExhausted(t *testing.T) {
 		atomic.AddInt32(&calls, 1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
-		fmt.Fprint(w, errorEnvelope("GeneralException", "Too Many Requests"))
+		_, _ = fmt.Fprint(w, errorEnvelope("GeneralException", "Too Many Requests"))
 	}))
 
 	from := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
@@ -340,7 +340,7 @@ func TestHistorical_NonRateLimitErrorNoRetry(t *testing.T) {
 		atomic.AddInt32(&calls, 1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
-		fmt.Fprint(w, errorEnvelope("TokenException", "Invalid token"))
+		_, _ = fmt.Fprint(w, errorEnvelope("TokenException", "Invalid token"))
 	}))
 
 	from := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
@@ -356,7 +356,7 @@ func TestHistorical_NonRateLimitErrorNoRetry(t *testing.T) {
 func TestHistorical_EmptyCandles(t *testing.T) {
 	p := newTestProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"status":"success","data":{"candles":[]}}`)
+		_, _ = fmt.Fprint(w, `{"status":"success","data":{"candles":[]}}`)
 	}))
 
 	from := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)

@@ -13,8 +13,8 @@ import (
 )
 
 type KiteProvider struct {
-	kc           *kiteconnect.Client
-	limiter      *Limiter
+	kc             *kiteconnect.Client
+	limiter        *Limiter
 	initialBackoff time.Duration // 0 → defaults to time.Second; override in tests
 }
 

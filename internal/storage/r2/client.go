@@ -74,7 +74,7 @@ func (c *Client) Download(ctx context.Context, key string) ([]byte, error) {
 		}
 		return nil, fmt.Errorf("r2 download %s: %w", key, err)
 	}
-	defer out.Body.Close()
+	defer func() { _ = out.Body.Close() }()
 
 	data, err := io.ReadAll(out.Body)
 	if err != nil {

@@ -50,7 +50,7 @@ func (p *KiteProvider) Instruments(ctx context.Context, exchange string) ([]prov
 			TickSize:       r.TickSize,
 		}
 		// Expiry is zero for equity; only set for derivatives
-		if r.Expiry.Time.Year() > 1 {
+		if r.Expiry.Year() > 1 {
 			inst.Expiry = r.Expiry.Time
 		}
 		out = append(out, inst)

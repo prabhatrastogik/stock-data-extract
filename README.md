@@ -151,6 +151,14 @@ The binary has **zero CGo dependencies** — it uses pure-Go SQLite (`modernc.or
 
 This opens a headless browser, logs into Zerodha using your credentials + TOTP, and prints the new access token. Set it as `KITE_ACCESS_TOKEN` and re-run as needed (tokens expire at 6 AM IST daily).
 
+### Run one incremental sync manually
+
+```bash
+./stock-data-extract incremental
+```
+
+Runs a single incremental pass immediately (same logic as the cron job): fetches today's instruments snapshot, then extracts yesterday's candles for all non-disabled asset types. Useful for triggering a sync on demand or debugging without waiting for the cron schedule.
+
 ### Run the nightly scheduler
 
 ```bash
@@ -239,6 +247,7 @@ cron:
 **`main.go`** — Binary entrypoint. Parses the subcommand and dispatches. `token-refresh` is handled immediately before any initialisation (no config, SQLite, or R2 needed). All other commands load config, create the SQLite directory, open the database, and initialise R2 and the Kite provider before dispatching.
 
 - `run`: starts the cron scheduler and blocks until SIGTERM/SIGINT.
+- `incremental`: runs a single incremental pass immediately — same logic as the cron job. Useful for on-demand syncs and debugging.
 - `backfill --type <equity|futures|options> --interval <day|15min>`: runs a full historical backfill for the given asset class and interval. The `disabled` flag in config has no effect here.
 - `token-refresh`: runs the automated browser login and prints the new access token.
 

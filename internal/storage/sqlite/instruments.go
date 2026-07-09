@@ -36,7 +36,7 @@ func (d *DB) UpsertInstruments(date time.Time, records []pq.InstrumentRecord) er
 		_ = tx.Rollback()
 		return fmt.Errorf("prepare upsert instruments: %w", err)
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	for _, r := range records {
 		if _, err := stmt.Exec(
@@ -63,7 +63,7 @@ func (d *DB) LatestInstruments(exchange, instrumentType string) ([]pq.Instrument
 	if err != nil {
 		return nil, fmt.Errorf("query latest instruments: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return scanInstruments(rows)
 }
@@ -111,7 +111,7 @@ func (d *DB) FnOEquityInstruments(equityExchange string, futuresExchanges []stri
 	if err != nil {
 		return nil, fmt.Errorf("query F&O equity instruments: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanInstruments(rows)
 }
 
@@ -131,7 +131,7 @@ func (d *DB) LatestInstrumentsBySegment(exchange, segment string) ([]pq.Instrume
 	if err != nil {
 		return nil, fmt.Errorf("query instruments by segment: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanInstruments(rows)
 }
 
@@ -151,7 +151,7 @@ func (d *DB) SearchInstruments(query string, limit int) ([]pq.InstrumentRecord, 
 	if err != nil {
 		return nil, fmt.Errorf("search instruments: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return scanInstruments(rows)
 }
@@ -169,7 +169,7 @@ func (d *DB) OptionExpiries(underlying string) ([]time.Time, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query option expiries: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var expiries []time.Time
 	for rows.Next() {

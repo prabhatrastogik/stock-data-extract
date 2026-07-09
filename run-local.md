@@ -75,6 +75,18 @@ Requires `cron.schedule` to be set in `config.yaml`. Example schedules:
 
 ---
 
+### `incremental`
+
+Runs a single incremental pass immediately — same logic as the cron job. Fetches today's instruments snapshot, then extracts yesterday's candles for all non-disabled asset types. Exits when complete.
+
+```sh
+./run-local.sh incremental
+```
+
+Use this to trigger a sync on demand without waiting for the cron schedule, or to test that everything is wired up correctly.
+
+---
+
 ### `backfill`
 
 Runs a one-off historical backfill for a given asset type and interval. Exits when complete.
@@ -214,7 +226,7 @@ If all three are set, the binary automatically refreshes the access token at sta
 
 ## Startup sequence
 
-For every command except `token-refresh`:
+For `run`, `incremental`, and `backfill`:
 
 ```
 [build]       go build ./cmd/

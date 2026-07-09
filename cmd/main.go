@@ -22,7 +22,7 @@ import (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: stock-data-extract <command>")
-		fmt.Fprintln(os.Stderr, "commands: run, backfill, token-refresh")
+		fmt.Fprintln(os.Stderr, "commands: run, incremental, backfill, token-refresh")
 		os.Exit(1)
 	}
 
@@ -45,7 +45,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("sqlite: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	r2 := r2client.New(
 		mustEnv("R2_ACCOUNT_ID"),
@@ -65,6 +65,9 @@ func main() {
 	switch os.Args[1] {
 	case "run":
 		runScheduler(cfg, kiteProvider, r2, db, autoRefreshCfg)
+
+	case "incremental":
+		runIncremental(cfg, kiteProvider, r2, db, autoRefreshCfg)
 
 	case "backfill":
 		runBackfill(cfg, kiteProvider, r2, db, autoRefreshCfg, os.Args[2:])
@@ -102,6 +105,23 @@ func runScheduler(
 
 	log.Println("Shutting down...")
 	sched.Stop()
+}
+
+func runIncremental(
+	cfg *config.Config,
+	kiteProvider *kiteprovider.KiteProvider,
+	r2 *r2client.Client,
+	db *sqlite.DB,
+	autoRefreshCfg *extractor.AutoRefreshConfig,
+) {
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
+	inc := extractor.NewIncrementalExtractor(kiteProvider, r2, db, cfg, autoRefreshCfg)
+	if err := inc.Run(ctx); err != nil {
+		log.Fatalf("incremental failed: %v", err)
+	}
+	log.Println("Incremental complete.")
 }
 
 func runBackfill(

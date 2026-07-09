@@ -66,22 +66,38 @@ litestream version   # verify
 
 ---
 
-## Step 4 — Install Chromium on the VPS
+## Step 4 — Install Chrome on the VPS
 
-Chromium is required for automated Kite token refresh.
+Chrome is required for automated Kite token refresh.
+
+> **Do NOT use `apt install chromium-browser` on Ubuntu 20.04+.** That package is a Snap stub. Snap's `snap-confine` requires the `cap_dac_override` kernel capability which is unavailable in most LXC/VPS containers — Chrome will fail to start with `snap-confine is packaged without necessary permissions`.
+
+### amd64 — Google Chrome from Google's .deb
 
 ```bash
-# Ubuntu / Debian
-apt update && apt install -y chromium-browser
-
-# Some distros use 'chromium' instead
-apt install -y chromium
+wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+apt install -y ./google-chrome-stable_current_amd64.deb
+rm google-chrome-stable_current_amd64.deb
 
 # Verify
-chromium-browser --version   # or: chromium --version
+google-chrome-stable --version
 ```
 
-> If the binary name differs from `chromium-browser`, check what `chromedp` finds by running `./stock-data-extract token-refresh` and watching the error. You can also create a symlink: `ln -s $(which chromium) /usr/local/bin/chromium-browser`.
+### arm64 (Hetzner CAX, Oracle Ampere, etc.)
+
+Google Chrome has no arm64 Linux build. Use Chromium from the Debian repository (a proper .deb, not Snap), or add the xtradeb PPA on Ubuntu:
+
+```bash
+# Debian (bullseye / bookworm) — native .deb
+apt install -y chromium
+
+# Ubuntu arm64 — non-Snap Chromium via xtradeb PPA
+add-apt-repository ppa:xtradeb/apps
+apt update && apt install -y chromium
+
+# Verify
+chromium --version
+```
 
 ---
 
@@ -164,6 +180,9 @@ RestartSec=30
 
 # Prevent credential leakage in core dumps
 PrivateTmp=true
+# NOTE: if Chrome is installed as a Snap package, remove NoNewPrivileges=true —
+# snap-confine needs setuid to acquire cap_dac_override and this flag blocks it.
+# The proper fix is to install Chrome as a non-Snap .deb (see Step 4).
 NoNewPrivileges=true
 
 # Log to journald (view with: journalctl -u stock-data-extract -f)
@@ -215,7 +234,8 @@ tmux new -s backfill
 set -a && source .env && set +a
 
 # Restore SQLite from R2 before starting (start.sh normally does this)
-litestream restore -if-replica-exists -force -config litestream.yml "$SQLITE_PATH"
+rm -f "$SQLITE_PATH" "${SQLITE_PATH}-shm" "${SQLITE_PATH}-wal"
+litestream restore -if-replica-exists -config litestream.yml "$SQLITE_PATH"
 
 # Start litestream replication in the background
 litestream replicate -config litestream.yml &
@@ -256,6 +276,18 @@ systemctl restart stock-data-extract
 # Stop cleanly (waits up to 5 minutes for running job to finish)
 systemctl stop stock-data-extract
 ```
+
+### Run an incremental sync manually
+
+To trigger a single incremental pass on demand (without waiting for the cron schedule):
+
+```bash
+su -s /bin/bash stock -c \
+  "set -a && source /opt/stock-data-extract/.env && set +a && \
+   /opt/stock-data-extract/stock-data-extract incremental"
+```
+
+This runs the same logic as the cron job: fetches today's instruments snapshot, then extracts yesterday's candles for all non-disabled asset types.
 
 ---
 

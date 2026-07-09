@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/prabhatrastogik/stock-data-extract/internal/config"
@@ -62,6 +63,7 @@ func (e *IncrementalExtractor) Run(ctx context.Context) error {
 			return fmt.Errorf("token expired and auto-refresh failed: %w", refreshErr)
 		}
 		e.provider.SetAccessToken(newToken)
+		_ = os.Setenv("KITE_ACCESS_TOKEN", newToken)
 		log.Println("[incremental] token refreshed successfully")
 	}
 
@@ -228,4 +230,3 @@ func (e *IncrementalExtractor) runFuturesIncremental(ctx context.Context, day ti
 	}
 	return nil
 }
-

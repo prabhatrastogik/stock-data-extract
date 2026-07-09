@@ -217,4 +217,3 @@ func extractRequestToken(rawURL string) (string, error) {
 	}
 	return token, nil
 }
-

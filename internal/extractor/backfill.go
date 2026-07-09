@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/prabhatrastogik/stock-data-extract/internal/config"
@@ -52,6 +53,7 @@ func (b *Backfiller) Run(ctx context.Context, cfg BackfillConfig) error {
 			return fmt.Errorf("token expired and auto-refresh failed: %w", refreshErr)
 		}
 		b.provider.SetAccessToken(newToken)
+		_ = os.Setenv("KITE_ACCESS_TOKEN", newToken)
 		log.Println("[backfill] token refreshed successfully")
 	}
 
@@ -317,4 +319,3 @@ func splitByMonth(from, to time.Time) [][2]time.Time {
 	}
 	return out
 }
-

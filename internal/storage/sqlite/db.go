@@ -42,14 +42,14 @@ func Open(path string) (*DB, error) {
 		"PRAGMA busy_timeout=5000",
 	} {
 		if _, err := db.Exec(pragma); err != nil {
-			db.Close()
+			_ = db.Close()
 			return nil, fmt.Errorf("%s: %w", pragma, err)
 		}
 	}
 
 	store := &DB{db: db}
 	if err := store.runMigrations(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("migrations: %w", err)
 	}
 
