@@ -18,4 +18,4 @@ litestream restore -if-replica-exists -config "$LITESTREAM_CONFIG" "$SQLITE_PATH
 # Run litestream as PID 1 with the binary as a managed subprocess.
 # This ensures litestream receives SIGTERM from Docker and can flush WAL segments
 # to R2 before the container exits — avoiding snapshot corruption on shutdown.
-exec litestream replicate -config "$LITESTREAM_CONFIG" -exec "/opt/stock-data-extract run"
+exec litestream replicate -config "$LITESTREAM_CONFIG" -exec "/opt/stock-data-extract/stock-data-extract run"
