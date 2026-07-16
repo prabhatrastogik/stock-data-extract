@@ -9,6 +9,6 @@ dbs:
         secret-access-key: ${R2_SECRET_ACCESS_KEY}
         region: auto
         force-path-style: true
-        sync-interval: 1m
-        retention: 24h          # keep only 24h of WAL segments; older ones are pruned
+        sync-interval: 20m
+        retention: 2h
         retention-check-interval: 1h

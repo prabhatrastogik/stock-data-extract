@@ -161,7 +161,8 @@ func (e *IncrementalExtractor) runEquityIncremental(ctx context.Context, day tim
 			}
 
 			for _, interval := range e.cfg.Extraction.Equity.Intervals {
-				candles, err := e.provider.Historical(ctx, inst.Token, interval, day, day, false, false)
+				to := endOfDay(day, interval)
+				candles, err := e.provider.Historical(ctx, inst.Token, interval, day, to, false, false)
 				if err != nil {
 					if isAuthError(err) {
 						return fmt.Errorf("access token invalid or expired — run token-refresh: %w", err)
@@ -204,7 +205,8 @@ func (e *IncrementalExtractor) runFuturesIncremental(ctx context.Context, day ti
 
 			token := fmt.Sprintf("%d", inst.Token)
 			for _, interval := range e.cfg.Extraction.Futures.Intervals {
-				candles, err := e.provider.Historical(ctx, token, interval, day, day, false, true)
+				to := endOfDay(day, interval)
+				candles, err := e.provider.Historical(ctx, token, interval, day, to, false, true)
 				if err != nil {
 					if isAuthError(err) {
 						return fmt.Errorf("access token invalid or expired — run token-refresh: %w", err)

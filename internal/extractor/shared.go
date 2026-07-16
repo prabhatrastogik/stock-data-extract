@@ -23,6 +23,17 @@ type AutoRefreshConfig struct {
 	TOTPSecret string
 }
 
+// endOfDay returns the end of the given day for the Kite API.
+// For daily candles, from=to=midnight is fine (date-based comparison).
+// For intraday (15min), from=to=midnight is a zero-length window before market
+// open and returns nothing — use end-of-day so the full trading session is covered.
+func endOfDay(day time.Time, interval string) time.Time {
+	if interval == "day" {
+		return day
+	}
+	return day.Add(24*time.Hour - time.Second)
+}
+
 // LastTradingDay returns yesterday, skipping weekends (Saturday→Friday, Sunday→Friday).
 // Exported so scheduler and cmd can use it without duplicating the logic.
 func LastTradingDay(today time.Time) time.Time {

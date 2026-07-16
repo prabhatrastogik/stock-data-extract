@@ -79,36 +79,51 @@ func AutoLogin(apiKey, apiSecret, userID, password, totpSecret string) (string, 
 
 	var currentURL string
 
+	logStep := func(msg string) chromedp.ActionFunc {
+		return func(_ context.Context) error {
+			log.Printf("[login] %s", msg)
+			return nil
+		}
+	}
+
 	err := chromedp.Run(ctx,
 		network.Enable(),
+		logStep("navigating to login page"),
 		chromedp.Navigate(loginURL),
 
 		// Fill user ID
+		logStep("waiting for userid field"),
 		chromedp.WaitVisible(`input[id="userid"]`, chromedp.ByQuery),
+		logStep("filling userid"),
 		chromedp.ActionFunc(reactSet(`input[id="userid"]`, userID)),
 
 		// Fill password
+		logStep("waiting for password field"),
 		chromedp.WaitVisible(`input[id="password"]`, chromedp.ByQuery),
+		logStep("filling password"),
 		chromedp.ActionFunc(reactSet(`input[id="password"]`, password)),
 
 		// Submit credentials
+		logStep("submitting credentials"),
 		chromedp.Click(`button[type="submit"]`, chromedp.ByQuery),
 
 		// Wait for TOTP screen. Kite reuses input[id="userid"] across all login steps;
 		// on the TOTP step it switches to type="number" with maxlength=6.
+		logStep("waiting for TOTP screen"),
 		chromedp.WaitVisible(`input[type="number"]`, chromedp.ByQuery),
 
 		// Generate and fill TOTP.
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			// If within 4 s of the 30-second TOTP window boundary, wait for the next window.
 			if remaining := 30 - (time.Now().Unix() % 30); remaining <= 4 {
+				log.Printf("[login] waiting %ds for TOTP window boundary", remaining+1)
 				time.Sleep(time.Duration(remaining+1) * time.Second)
 			}
 			code, err := totp.GenerateCode(totpSecret, time.Now())
 			if err != nil {
 				return fmt.Errorf("generate totp: %w", err)
 			}
-
+			log.Println("[login] filling TOTP")
 			if err := chromedp.Click(`input[type="number"]`, chromedp.ByQuery).Do(ctx); err != nil {
 				return fmt.Errorf("click totp input: %w", err)
 			}
@@ -119,12 +134,14 @@ func AutoLogin(apiKey, apiSecret, userID, password, totpSecret string) (string, 
 		}),
 
 		// Submit TOTP
+		logStep("submitting TOTP"),
 		chromedp.Click(`button[type="submit"]`, chromedp.ByQuery),
 
 		// Wait for the redirect URL captured by ListenTarget above.
 		// We can't use Location() here because Chrome navigates to the redirect URL
 		// (e.g. 127.0.0.1?request_token=...) but immediately shows a connection-refused
 		// error page, at which point Location() returns the Chrome error page URL.
+		logStep("waiting for request_token redirect"),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			select {
 			case url := <-redirectCh:
@@ -137,7 +154,8 @@ func AutoLogin(apiKey, apiSecret, userID, password, totpSecret string) (string, 
 	)
 	cancelTimeout()
 	if err != nil {
-		saveScreenshot(browserCtx) // browserCtx still valid; timeout context already cancelled above
+		// browserCtx may already be dead after timeout; open a fresh tab from allocCtx.
+		saveScreenshot(allocCtx)
 		cancelBrowser()
 		return "", fmt.Errorf("browser login: %w", err)
 	}
@@ -157,9 +175,12 @@ func AutoLogin(apiKey, apiSecret, userID, password, totpSecret string) (string, 
 }
 
 // saveScreenshot captures the current browser state to /tmp/kite-login-debug.png.
-// Must be called with the browser context (not the expired timeout context).
-func saveScreenshot(browserCtx context.Context) {
-	ctx, cancel := context.WithTimeout(browserCtx, 10*time.Second)
+// Pass allocCtx (the exec allocator context) — browserCtx may already be dead after a timeout.
+// A fresh browser tab is opened for the capture and immediately closed.
+func saveScreenshot(allocCtx context.Context) {
+	freshCtx, cancelBrowser := chromedp.NewContext(allocCtx)
+	defer cancelBrowser()
+	ctx, cancel := context.WithTimeout(freshCtx, 10*time.Second)
 	defer cancel()
 	var buf []byte
 	if err := chromedp.Run(ctx, chromedp.CaptureScreenshot(&buf)); err != nil {
